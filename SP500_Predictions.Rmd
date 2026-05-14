@@ -1,0 +1,1814 @@
+---
+title: "Predicting SP500 Stock Market Index"
+author: "Mathieu Breier"
+date: "21 May 2024"
+output:
+  html_document:
+    toc: TRUE
+    toc_depth: 3
+    toc_float: TRUE
+    code_folding: hide
+    df_print: paged
+    DT: datatable
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = TRUE)
+```
+
+![](/Users/mathieu26/Desktop/Github Pages/testwebsite5.github.io/data_science/example1/Stock_Market_Index.jpeg)
+
+## Introduction
+
+XXX
+
+#### Loading Libraries
+
+This chunk is used to load and set up the environment, including importing required libraries, setting the working directory, and ensuring required packages are installed.
+
+```{r loading_libraries, warning=FALSE, message=FALSE, results='hide', echo=TRUE}
+
+rm(list=ls())
+
+### Setting Work Directory
+setwd("/Users/mathieu26/Desktop/DSDM-BSE/Term_3/Machine_Learning_Finance/Assignment1")
+
+### List of required packages
+required_packages <- c(
+  "keras", "forecast", "kernlab", "corrplot", "RColorBrewer", "Boruta", 
+  "reshape2", "viridis", "scales", "xts", "quantmod", "vars", "bruceR", 
+  "energy", "tseries", "lubridate", "glmnet", "plyr", "dplyr", "TTR", 
+  "zoo", "tidyverse", "ggplot2", "neuralnet", "visdat", "e1071", 
+  "nnet", "reticulate", "tensorflow","plotly","shiny", "shinyWidgets", "pracma","knitr", "plotly"
+)
+
+### Function to install and load packages
+install_and_load <- function(packages) {
+  to_install <- packages[!(packages %in% installed.packages()[,"Package"])]
+  if(length(to_install)) install.packages(to_install)
+  lapply(packages, library, character.only = TRUE)
+}
+
+### Install and load the required packages
+install_and_load(required_packages)
+
+### Set the seed for reproducibility
+#set.seed(123)
+```
+
+#### Import Data
+
+I load the Goyal-Welch dataset and create an initial DataFrame for processing.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Importing the "goyal-welch2022Monthly.csv" dataset
+gw2022 <- read.csv('/Users/mathieu26/Desktop/DSDM-BSE/Term_3/Machine_Learning_Finance/Assignment1/goyal-welch2022Monthly.csv',sep=',',header=TRUE)
+df <- read.csv('/Users/mathieu26/Desktop/DSDM-BSE/Term_3/Machine_Learning_Finance/Assignment1/goyal-welch2022Monthly.csv',sep=',',header=TRUE)
+```
+
+### First Look at the Data
+
+Initial exploration of the dataset. In this part, I look at the first few rows, and examine basic statistics.
+
+#### Data Overview
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# View the first few rows of the dataset
+head(gw2022)
+```
+CHANGE TABLE TO PRETTIER
+#### Data Structure
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Structure of the dataset
+str(gw2022)
+```
+CHANGE TABLE TO PRETTIER
+
+#### Summary Statistics
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Summary statistics
+summary(gw2022)
+```
+CHANGE TABLE TO PRETTIER
+
+#### Missing Values Statistics
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Number of missing values per column
+missing_values <- sapply(gw2022, function(x) sum(is.na(x)))
+missing_values
+```
+CHANGE TABLE TO PRETTIER
+
+#### Variable Names
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Printing the name of the variables
+print(names(gw2022))
+```
+CHANGE TABLE TO PRETTIER
+
+## Data Cleaning & Preprocessing
+
+#### Data Preparation
+
+In this section, I perform several steps to clean and preprocess the data for further analysis. I convert 'Index' to numeric, rename columns, adjust the date format, and filter the dataset.
+
+Next, I ensure the 'Date' column represents the first day of each month. I filter the rows to include data between November 1926 and December 2021, excluding rows with a lot of missing values.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Convert 'Index' to numeric 
+gw2022$Index <- as.numeric(gsub(",", "", gw2022$Index))
+df$Index <- as.numeric(gsub(",", "", gw2022$Index))
+
+# Change 'yyyymm' to 'Date'
+names(gw2022)[names(gw2022) == "yyyymm"] <- "Date"
+
+df$yyyymm <-ym(df$yyyymm) 
+df <- as.xts(df[-1],order.by = df$yyyymm)
+
+# Convert 'yyyymm' to a Date format with the first day of each month
+gw2022$Date <- ymd(paste0(gw2022$Date, "01"))
+
+# Filter rows for the period between January 1927 (-1 month that will be removed when computing returns) and December 2021
+gw2022 <- gw2022 %>%
+  filter(Date >= as.Date("1926-11-30") & 
+           Date <= as.Date("2021-12-31"))
+
+#df=df['1927/2021']
+```
+
+#### Creating additional Financial Variables
+
+I create the following varibles using the goyal-welch2022Monthly dataset:
+
+-   logret: Calculated as the log return of the Index.
+-   IndexDiv: Sum of Index and Dividends.
+-   logretdiv: Log return including dividends.
+-   Logarithm of the risk-free rate.
+-   GSPCep: Log equity premium (log return including dividends minus log risk-free rate).
+-   dp: Dividend-Price ratio (log of D12 minus log of Index).
+-   de: Dividend-Payout ratio (log of D12 minus log of E12).
+-   ep: Earnings to Price ratio (log of E12 minus log of Index).
+-   dy: Dividend Yield (log of D12 minus log of the previous period's Index).
+-   dfy: Default Yield Spread (BAA rate minus AAA rate).
+-   svar: Stock variance.
+-   bm: Book-to-Market ratio.
+-   ntis: Net Equity Expansion.
+-   infl: Inflation rate.
+-   tbl: Treasury Bill rates.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Rename Index to SP500
+gw2022$SP500 <- gw2022$Index
+SP500 <- df$Index
+
+# Computing Log Return
+# gw2022$logret <- diff(log(gw2022$Index))
+gw2022$logret <- c(NA, diff(log(gw2022$Index)))
+logret <- c(NA, diff(log(gw2022$Index)))
+
+# Calculate Index Plus Dividends
+gw2022$IndexDiv <- gw2022$Index + gw2022$D12
+IndexDiv <- gw2022$Index + gw2022$D12
+
+# Compute Log Returns Including Dividends
+gw2022$logretdiv <- c(NA, diff(log(gw2022$IndexDiv)))
+logretdiv <- c(NA, diff(log(gw2022$IndexDiv)))
+
+# Compute Logarithm of Risk-Free Rate
+gw2022$logRfree <- log(gw2022$Rfree + 1)
+logRfree <- log(gw2022$Rfree + 1)
+
+# Calculate Log Equity Premium
+gw2022$GSPCep <- gw2022$logretdiv - gw2022$logRfree
+GSPCep <- gw2022$logretdiv - gw2022$logRfree
+
+## Computing a bunch of financial indicators separately 
+# Dividend-Price Ratio (dp)
+gw2022$dp <- log(gw2022$D12) - log(gw2022$Index)
+dp <- log(gw2022$D12) - log(gw2022$Index)
+
+# Dividend-Payout Ratio (de)
+gw2022$de <- log(gw2022$D12) - log(gw2022$E12)
+de <- log(gw2022$D12) - log(gw2022$E12)
+
+# Earnings to Price (ep)
+gw2022$ep <- log(gw2022$E12) - log(gw2022$Index)
+ep <- log(df$E12) - log(df$Index)
+
+# Dividend Yield (dy)
+gw2022$dy <- log(gw2022$D12) - log(c(NA, gw2022$Index[-length(gw2022$Index)]))  # shift the Index column
+dy <- log(df$D12) - log(c(NA, df$Index[-length(df$Index)]))  # shift the Index column
+
+# Default Yield Spread (dfy)
+gw2022$dfy <- gw2022$BAA - gw2022$AAA
+dfy <- gw2022$BAA - gw2022$AAA
+
+# Stock Variance (svar)
+gw2022$svar <- gw2022$svar  # This line is redundant in R unless renaming or similar operations are needed
+svar <- gw2022$svar  # This line is redundant in R unless renaming or similar operations are needed
+
+# Book-to-Market Ratio (b/m)
+gw2022$b.m <- gw2022$b.m  # Assuming 'b.m' is already the correct column
+b.m <- df$b.m  # Assuming 'b.m' is already the correct column
+
+# Net Equity Expansion (ntis)
+gw2022$ntis <- gw2022$ntis  # This line is also redundant unless further operations are needed
+ntis <- df$ntis  # This line is also redundant unless further operations are needed
+
+# Inflation (infl)
+gw2022$infl <- gw2022$infl  # As above, redundant unless more operations are needed
+infl <- gw2022$infl  # As above, redundant unless more operations are needed
+
+# Treasury Bill Rates (tbl)
+gw2022$tbl <- gw2022$tbl  # As above
+tbl <- gw2022$tbl  # As above
+
+# Remove first Row of dataset used for returns calculation
+gw2022 <- gw2022 %>%
+  slice(-1)
+```
+
+#### Verify missing values
+
+After having created and transformed the initial variables, I check again for missing values. 
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Last Check at NA's
+missing_values <- sapply(gw2022, function(x) sum(is.na(x)))
+missing_values
+```
+
+Only the variable "csp" contains missing values. I decide to impute the missing values with the mean of 'csp'.
+I verify again if the imputation removed all missing values below.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Calculate the mean of 'csp', excluding NA values
+mean_csp <- mean(gw2022$csp, na.rm = TRUE)
+mean_csp_df <- mean(df$csp, na.rm = TRUE)
+
+# Mean Imputing: Replace NA values with the mean in 'csp'
+gw2022$csp[is.na(gw2022$csp)] <- mean_csp
+df$csp[is.na(df$csp)] <- mean_csp_df
+
+# Last Check at NA's
+missing_values <- sapply(gw2022, function(x) sum(is.na(x)))
+missing_values
+```
+
+## Exploratory Data Analysis
+
+#### Time Series Plot of S&P 500 Index
+
+Visualizing the S&P 500 index over time allows us to understand the overall trend and behavior of the market. This plot helps identify long-term growth, periods of stability, and sudden changes or economic downturns.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Time Series Plot of S&P 500 Index
+ggplot(gw2022, aes(x = Date, y = SP500)) +
+  geom_line() +
+  labs(title = "S&P 500 Index Over Time", x = "Date", y = "Index Value")+  
+  theme_minimal()
+```
+
+#### Histogram of Log Returns
+
+The histogram of log returns help us understand the distribution and behavior of the returns of the S&P 500. It helps us assess whether the returns are normally distributed and provides insight into the volatility of the market. By visualizing the frequency of different return values, we can identify outliers, skewness, and the presence of extreme events (such as significant market crashes or rallies).
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Histogram of Log Returns of the S&P 500
+ggplot(gw2022, aes(x = logret)) +
+  geom_histogram(bins = 30, fill = "#0b2c5c", color = "black") +
+  labs(title = "Histogram of Log Returns of S&P 500", x = "Log Returns", y = "Frequency")+  
+  theme_minimal()
+```
+
+#### Correlation Heatmap
+
+The correlation heatmap tells us how the financial indicators relate to each other and to the S&P 500 index. Understanding the correlation between variables helps in feature selection and engineering, as it highlights which features are strongly associated with the target variable. It also helps identify multicollinearity issues, allowing us to select the most independent and informative variables to improve model performance.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Correlation Heatmap of Financial Indicators !!!
+financial_indicators <- gw2022[, c("Index", "D12", "E12", "b.m", "tbl", "AAA", "BAA", 
+                                   "lty", "ntis", "Rfree", "infl", "svar", 
+                                   "csp", "SP500", "IndexDiv", "dp", "de", "ep", "dy")]
+
+corr_matrix <- cor(financial_indicators, use = "complete.obs")
+corrplot(
+  corr_matrix, 
+  method = "color", 
+  type = "full", 
+  order = "hclust", 
+  addCoef.col = "black",  # Color of the correlation coefficients
+  tl.col = "black",       # Text label color
+  tl.srt = 0,            # Rotate the text labels
+  diag = TRUE,           # Hide the diagonal
+  col = brewer.pal(n = 11, name = "RdBu"),  # Color palette
+  number.cex = 0.60        # Adjust the size of the numbers inside the cells
+)
+```
+
+The variables "dp", "dy", "E12", "D12", "csp" and "b.m" are highly correlated with the SP500 stock market price index.
+MULTICOLLINEARITY
+
+## Feature Selection I
+
+```{r, warning=FALSE, message=FALSE, results='hide', echo=TRUE}
+rownames(gw2022) <- as.character(gw2022$Date)
+gw2022 <- gw2022[, -which(names(gw2022) == "Date")]  # Remove the Date column after setting it as rownames
+
+nrow(gw2022)
+
+## Creating Dataset to perform feature engineering and feature selection 
+data <- gw2022
+#nrow(data)
+```
+
+This section uses Lasso and Ridge Regression to determine which features are most important for predicting the target variable, S&P 500.
+
+#### Feature Selection using Lasso
+
+Lasso adds a penalty equivalent to the absolute value of the magnitude of the coefficients, which can shrink some coefficients to exactly zero. This results in the elimination of less important features, making it effective for feature selection.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+## Feature Selection using LASSO and RIDGE: Removing variables that do not contribute at all.
+# Lasso
+lasso <- function(data){
+  X <- scale(data[,-1]) #We standardize the values (mean=0 and variance=1) !!!!!!
+  y <- data[,1]
+  number <- floor(nrow(X) * 0.80)
+  #training set
+  X_train <- X[1:number,]
+  y_train <- y[1:number]
+  #test set
+  X_test <- X[(number+1):nrow(X),]
+  y_test <- y[(number+1):length(y)]
+  #We standardize the values (mean=0 and variance=1)
+  X_train <- as.matrix(scale(X_train))
+  X_test <- as.matrix(scale(X_test))
+  #We want to find the optimal lambda (we tune the parameters)
+  cv.elnet <- cv.glmnet(X_train, y_train, alpha = 1)
+  #With the optimal lambda we fin the coefficients of interest (to see with one we can discard)
+  best_lambda <- cv.elnet$lambda.min
+  elnet_model <- glmnet(X_train, y_train, alpha = 1, lambda = best_lambda)
+  #coefficients
+  coef <- as.data.frame(as.matrix(predict(elnet_model, type="coefficients", s = best_lambda)))
+  #we want the coefficients
+  coef$variable <- rownames(coef)
+  colnames(coef) <- c("Coefficient")
+  variables <- coef[coef$Coefficient != 0,]
+  rownames(variables) <- NULL
+  return(variables[-1,])
+}
+
+# We run the function to see which variable we can use:
+data_lasso <- data[, !(colnames(data) %in% "SP500")]  # Exclude SP500 from features
+variables_lasso <- lasso(data_lasso)
+variables_lasso # does not provide useful information
+
+```
+
+The Lasso regression analysis indetifies IndexDiv, the sum of the S&P 500 Index and dividends, as the most important feature for predicting the market index. This is results is intuitive as IndexDiv already includes the SP500 values.
+
+#### Feature Selection using Ridge
+
+Ridge Regression, on the other hand, adds a penalty equivalent to the square of the magnitude of the coefficients. Unlike Lasso, Ridge does not shrink coefficients to zero, but it helps in reducing multicollinearity by reducing the influence of less important features. Based on the magnitude of the coefficients, I decide to retain only the variables that have the highest impact, as indicated by their larger coefficients.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+## We also try with ridge
+ridge <- function(data){
+  X <- scale(data[,-1]) #We standardize the values (mean=0 and variance=1)
+  y <- data[,1]
+  number <- floor(nrow(X) * 0.80)
+  #training set
+  X_train <- X[1:number,]
+  y_train <- y[1:number]
+  #test set
+  X_test <- X[(number+1):nrow(X),]
+  y_test <- y[(number+1):length(y)]
+  #We standardize the values (mean=0 and variance=1)
+  X_train <- as.matrix(scale(X_train))
+  X_test <- as.matrix(scale(X_test))
+  #We want to find the optimal lambda (we tune the parameters)
+  cv.elnet <- cv.glmnet(X_train, y_train, alpha = 0)
+  #With the optimal lambda we fin the coefficients of interest (to see with one we can discard)
+  best_lambda <- cv.elnet$lambda.min
+  elnet_model <- glmnet(X_train, y_train, alpha = 0, lambda = best_lambda)
+  #coefficients
+  coef <- as.data.frame(as.matrix(predict(elnet_model, type="coefficients", s = best_lambda)))
+  #we want the coefficients
+  coef$variable <- rownames(coef)
+  colnames(coef) <- c("Coefficient")
+  variables <- coef[coef$Coefficient != 0,]
+  rownames(variables) <- NULL
+  return(variables[-1,])
+}
+# We run the function
+data_ridge <- data[, !(colnames(data) %in% "SP500")]  # Exclude SP500 from features
+variables_ridge <- ridge(data_ridge)
+variables_ridge # BAA, CRSP_SPvwx, CRSP_SPvw, GSPCep, logretdiv have coefficients close to 0
+```
+
+The Ridge regression identified "IndexDiv" (sum of the S&P 500 Index and dividends) as the most significant predictor for the S&P 500 index.
+
+"E12" (earnings over the last 12 months) and "D12" (dividends over the last 12 months) also had strong positive coefficients, 72.65 and 58.76, respectively. This indicates that both earnings and dividends are essential drivers of the S&P 500, consistent with the idea that profitability and consistent dividend payments are critical factors for investor confidence and stock price growth.
+
+The "Book-to-Market Ratio" (b.m) also showed a positive relationship with the S&P 500 index, with a coefficient of 10.24, highlighting that companies with a higher book-to-market ratio (often indicating undervaluation) are significant in explaining stock movements.
+
+Overall, these findings emphasize that both profitability (earnings) and shareholder returns (dividends) are important predictors of the S&P 500 index, while valuation ratios like book-to-market and dividend yield provide additional insights into market expectations.
+
+#### Feature Selection Using Random Forest (Boruta)
+
+In this section, I employ decision trees using the Boruta library for feature selection to determine the most impactful variables for predicting the S&P 500 stock market price.
+
+The feature selection process using decision trees with the Boruta library aims to identify the most important variables for predicting the S&P 500 index. Boruta works by iteratively comparing the importance of original features against random, shadow features. If an original feature consistently shows higher importance compared to the shadow features, it is considered important and kept. This process helps to eliminate irrelevant features, ensuring that only the most significant predictors are included in the model.
+
+Shadow features in the Boruta feature selection process are created by shuffling the values of the original features, essentially creating randomly permuted versions of the data.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+## Feature Selection: Using Decision Trees with Boruta library
+# Convert xts object to data frame, preserving the date index
+train_set <- data.frame(date = index(data), coredata(data))
+train_set_boruta <- train_set[, !(colnames(train_set) %in% "SP500")]
+# Run Boruta feature selection
+boruta_output <- Boruta(Index ~ ., data = train_set_boruta[, -1], doTrace = 0)
+# Resolve Tentative attributes
+rough_fix_mod <- TentativeRoughFix(boruta_output)
+# Get the selected attributes
+boruta_signif <- getSelectedAttributes(rough_fix_mod)
+# Get the importances of the selected attributes
+importances <- attStats(rough_fix_mod)
+# Filter the importances to include only the ones that are not rejected
+importances <- importances[importances$decision != "Rejected", c("meanImp", "decision")]
+# Order the importances by mean importance in descending order
+importances[order(-importances$meanImp), ]
+```
+
+The results of the Boruta feature selection identified the following five features as the most important in predicting the S&P 500 index: "IndexDiv," "D12," "E12," "BAA," and "lty."
+
+"IndexDiv" (the sum of the S&P 500 Index and dividends) had the highest mean importance (16.03), similar to the Lasso and Ridge regression results, where it also emerged as the most significant predictor. This reinforces the idea that total value returned to investors, in terms of both dividends and index value, is a critical factor in predicting market movements.
+
+"D12" (dividends over the last 12 months) and "E12" (earnings over the last 12 months) were also highly ranked, consistent with the Ridge results where both variables had strong positive coefficients. This underscores the role of profitability and consistent dividend payouts as major contributors to the S&P 500 index's performance.
+
+"BAA" (the BAA bond yield) was also identified as important, which aligns with the Ridge regression results. This suggests that corporate bond yields provide useful insights into overall market conditions and investor sentiment.
+
+Lastly, "lty" (long-term government bond yields) was highlighted, similar to the Ridge regression, where it had a notable coefficient. This indicates that long-term interest rates are an important factor in explaining the stock market index, as they influence investor returns and borrowing costs.
+
+The Boruta feature selection results show a strong alignment with the Ridge regression findings, confirming the importance of dividends, earnings, and interest rate-related variables in predicting the S&P 500 index. The consistency between different methods provides additional confidence in the robustness of these selected features.
+
+#### Removing Non-Selected Features
+
+In this chunk, I remove the features that were indicated as not significant by Boruta methods.
+
+```{r, warning=FALSE, message=FALSE, results='hide', echo=TRUE}
+# Get all variable names except 'Index'
+all_variables <- colnames(train_set[, -1])
+# Identify the variables not confirmed by Boruta
+not_confirmed <- setdiff(all_variables, boruta_signif)
+# Print the not confirmed variables
+#print("Variables not confirmed as important:")
+#print(not_confirmed) # "ltr", "corpr", "CRSP_SPvw", "CRSP_SPvwx", "logret", "logretdiv", "GSPCep"    
+
+# List of variables to remove
+#variables_to_remove <- c("Index","tbl","de","Rfree","logRfree","dfy","svar","infl", "ltr", "corpr", "CRSP_SPvw", "CRSP_SPvwx", "logret", "logretdiv", "GSPCep")
+# Remove the specified variables from the dataset
+#data <- data[, !colnames(data) %in% variables_to_remove]
+# Verify the changes
+
+#print(colnames(data))
+```
+
+## Identifying Optimal Lags
+
+#### Method 1: VAR Model Selection
+
+I use the VARselect function in R to determine the optimal lag length for a Vector Autoregressive (VAR) model based on the Hannan-Quinn criterion. Different lag lengths are tried, and the lag with the lowest value for the chosen information criterion is selected as the optimal lag.
+
+The Hannan-Quinn criterion is used to find the lag length that provides the best balance between model fit and complexity. It penalizes the number of parameters in the model. This criterion effectively balances between capturing enough information without overfitting.
+
+The VAR model is fitted using different lag lengths, and the HQ value is calculated for each. The lag with the lowest HQ value is selected as the optimal lag. This helps to ensure that the model captures relationships between variables while preventing overfitting due to excessive parameters.
+
+```{r, warning=FALSE, message=FALSE, results='hide', echo=TRUE}
+# Variables to identify the optimal lags from: SP500, IndexDiv, D12, E12, BAA, lty
+data_lags <- data[, c("SP500", "IndexDiv", "D12", "E12", "BAA", "lty", "AAA","dy","dp","ep","ntis","b.m","tbl","de")]
+```
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+### METHOD 1: 
+p <- VARselect(na.omit(data_lags),lag.max=15,type="none")$selection["HQ(n)"]
+p # maximum significant lag
+```
+
+#### Method 2: ARIMA Model Selection for Each Variable
+
+The VARselect function in R determines the optimal lag length for a Vector Autoregressive (VAR) model considering all variables together, which might not be optimal for each individual variable. To find the optimal number of lags for each variable separately, you can use the auto.arima function from the forecast package. This function automatically selects the best ARIMA model for each time series, which includes determining the optimal number of lags for each variable.
+
+In ARIMA model selection, the main goal is to determine the best parameters for the AR (autoregressive), I (integrated or differencing), and MA (moving average) components to accurately model and predict a time series. The process starts with the Autocorrelation Function (ACF) and Partial Autocorrelation Function (PACF) plots. The ACF shows how current values are correlated with past values, which helps determine the number of moving average terms (MA). The PACF plot, on the other hand, shows the direct correlation between the series and its lagged values while controlling for intermediate lags, which helps in identifying the number of autoregressive terms (AR).
+
+Once the initial estimates of the AR and MA orders are obtained from the ACF and PACF plots, the next step is to refine these values. This is done using information criteria like AIC (Akaike Information Criterion) and BIC (Bayesian Information Criterion), which balance model fit with simplicity. A model with a lower AIC or BIC is generally preferred, as it indicates better fit with less complexity. Tools like auto.arima() in R or Python's pmdarima library can automate this process by testing different combinations of parameters and selecting the best one based on these criteria.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+### METHOD 2: 
+find_optimal_lag <- function(ts_data) {
+  fit <- auto.arima(ts_data, seasonal = FALSE, stepwise = FALSE, approximation = FALSE)
+  return(fit$arma[1])  # Return the number of AR lags (p)
+}
+
+# Create a data frame to store the optimal lags for each variable
+optimal_lags <- data.frame(Variable = colnames(data_lags), Optimal_Lag = NA)
+
+# Loop through each variable and find the optimal lag
+for (i in 1:ncol(data_lags)) {
+  ts_data <- na.omit(data_lags[, i])  # Remove NAs from the time series data
+  optimal_lags$Optimal_Lag[i] <- find_optimal_lag(ts_data)
+}
+
+# Print the optimal lags for each variable
+print(optimal_lags)
+```
+
+### Feature Engineering with Lags
+
+#### Create Lags Using Loop
+
+```{r, warning=FALSE, message=FALSE, results='hide', echo=TRUE}
+# Ensure the data is an xts object
+data <- xts::as.xts(data)
+
+# Extract columns from the data object
+D12 <- data$D12
+E12 <- data$E12
+b.m <- data$b.m
+tbl <- data$tbl
+AAA <- data$AAA
+BAA <- data$BAA
+lty <- data$lty
+ntis <- data$ntis
+Rfree <- data$Rfree
+infl <- data$infl
+svar <- data$svar
+csp <- data$csp
+SP500 <- data$SP500
+Index <- data$Index
+logRfree <- data$logRfree
+dp <- data$dp
+de <- data$de
+ep <- data$ep
+dy <- data$dy
+dfy <- data$dfy
+IndexDiv <- data$IndexDiv
+```
+
+I create several lags for the selected features to try different combinations in the models. I select the variables based on the Lasso, Ridge and Boruta feature selection results.
+
+Regarding the number of lags, I decide to consider the results of Vector Autoregressive (VAR) model. I create 10 lags for all the variables.
+
+I will later perform further feature selection to decide if it is necessary to keep all the lags or if I can only keep certain.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Method with Loop to create lags:
+# Creating the features and their lags USING LOOPS
+variables <- c("SP500", "IndexDiv", "D12", "E12", "BAA", "lty", "AAA", "dy", "dp", "ep", "ntis", "b.m")
+# List of variables based on boruto rule (coefficent > 7)
+
+# Initialize an empty xts object to store the features
+feat <- xts(order.by = index(data))
+
+# Creating the features and their lags using loops without na.trim
+for (var in variables) {
+  for (lag in 0:10) {
+    if (lag == 0) {
+      new_col <- data[, var]
+      colnames(new_col) <- var
+    } else {
+      new_col <- lag.xts(data[, var], lag)
+      colnames(new_col) <- paste0(var, "_lag", lag)
+    }
+    
+    # Align new_col with feat to ensure proper length for merge
+    feat <- merge(feat, new_col, all = FALSE)
+  }
+}
+
+# Remove rows with any NA values
+feat <- na.omit(feat)
+
+# Remove the variable SP500 (original target variable), but keep its lags
+if ("SP500" %in% colnames(feat)) {
+  feat <- feat[, colnames(feat) != "SP500"]
+}
+
+# Print the column names to verify
+print(colnames(feat))
+```
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Defining the Target variable
+target <- SP500
+names(target) <- "SP500"
+
+# Creating the Final df
+final_df = merge(feat,target,all=FALSE)
+```
+
+## Feature Selection II
+
+In this section, I perform feature selection again, but this time with the created lagged features to determine which lags should be retained.
+
+#### Lasso for Lagged Features
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+## Feature Selection using LASSO and RIDGE:
+# Lasso
+lasso <- function(data){
+  X <- scale(data[,-1]) #We standardize the values (mean=0 and variance=1)
+  y <- data[,1]
+  number <- floor(nrow(X) * 0.80)
+  #training set
+  X_train <- X[1:number,]
+  y_train <- y[1:number]
+  #test set
+  X_test <- X[(number+1):nrow(X),]
+  y_test <- y[(number+1):length(y)]
+  #We standardize the values (mean=0 and variance=1)
+  X_train <- as.matrix(scale(X_train))
+  X_test <- as.matrix(scale(X_test))
+  #We want to find the optimal lambda (we tune the parameters)
+  cv.elnet <- cv.glmnet(X_train, y_train, alpha = 1)
+  #With the optimal lambda we fin the coefficients of interest (to see with one we can discard)
+  best_lambda <- cv.elnet$lambda.min
+  elnet_model <- glmnet(X_train, y_train, alpha = 1, lambda = best_lambda)
+  #coefficients
+  coef <- as.data.frame(as.matrix(predict(elnet_model, type="coefficients", s = best_lambda)))
+  #we want the coefficients
+  coef$variable <- rownames(coef)
+  colnames(coef) <- c("Coefficient")
+  variables <- coef[coef$Coefficient != 0,]
+  rownames(variables) <- NULL
+  return(variables[-1,])
+}
+
+# We run the function to see which variable we can use:
+variables_lasso <- lasso(final_df)
+variables_lasso
+
+```
+
+#### Ridge for Lagged Features
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# We also try with ridge
+ridge <- function(data){
+  X <- scale(data[,-1]) #We standardize the values (mean=0 and variance=1)
+  y <- data[,1]
+  number <- floor(nrow(X) * 0.80)
+  #training set
+  X_train <- X[1:number,]
+  y_train <- y[1:number]
+  #test set
+  X_test <- X[(number+1):nrow(X),]
+  y_test <- y[(number+1):length(y)]
+  #We standardize the values (mean=0 and variance=1)
+  X_train <- as.matrix(scale(X_train))
+  X_test <- as.matrix(scale(X_test))
+  #We want to find the optimal lambda (we tune the parameters)
+  cv.elnet <- cv.glmnet(X_train, y_train, alpha = 0)
+  #With the optimal lambda we fin the coefficients of interest (to see with one we can discard)
+  best_lambda <- cv.elnet$lambda.min
+  elnet_model <- glmnet(X_train, y_train, alpha = 0, lambda = best_lambda)
+  #coefficients
+  coef <- as.data.frame(as.matrix(predict(elnet_model, type="coefficients", s = best_lambda)))
+  #we want the coefficients
+  coef$variable <- rownames(coef)
+  colnames(coef) <- c("Coefficient")
+  variables <- coef[coef$Coefficient != 0,]
+  rownames(variables) <- NULL
+  return(variables[-1,])
+}
+# We run the function
+variables_ridge <- ridge(final_df)
+variables_ridge
+```
+
+```{r, warning=FALSE, message=FALSE, results='hide', echo=TRUE}
+## List of variables to remove from Ridge and Lasso
+#variables_to_remove <- c("ntis_lag3","ep_lag2","ep","ntis_lag2")
+# Remove the specified variables from the dataset
+#final_df <- final_df[, !colnames(final_df) %in% variables_to_remove]
+# Verify the changes
+#print(colnames(final_df))
+```
+
+#### Feature Selection with Random Forest on Lagged Features
+
+Again, I use Boruta method for feature selection to determine the importance of the created lagged features.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+## Feature Selection 2 with Lags: Using Decision Trees with Boruta library
+# Convert xts object to data frame, preserving the date index
+train_set <- data.frame(date = index(final_df), coredata(final_df))
+
+# Run Boruta feature selection
+boruta_output <- Boruta(SP500 ~ ., data = train_set[, -1], doTrace = 0)
+
+# Resolve Tentative attributes
+rough_fix_mod <- TentativeRoughFix(boruta_output)
+
+# Get the selected attributes
+boruta_signif <- getSelectedAttributes(rough_fix_mod)
+
+# Get the importances of the selected attributes
+importances <- attStats(rough_fix_mod)
+
+# Filter the importances to include only the ones that are not rejected
+importances <- importances[importances$decision != "Rejected", c("meanImp", "decision")]
+
+# Order the importances by mean importance in descending order
+importances[order(-importances$meanImp), ]
+```
+
+#### Final Feature Selection for Lagged Features
+
+I decide to only keep these following 2 features : "SP500_lag2", "IndexDiv_lag1". I remove all the other variables from the final dataframe. 
+EXPLAIN WHY
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+
+# List of variables to remove
+# variables_to_remove <- c("AAA","AAA_lag1","AAA_lag2","dy_lag1","dy_lag3","dp_lag6", "dy_lag5", "dy_lag7", "dp_lag2", "dp_lag3", "dp_lag4", "dp_lag5", "dp_lag6", "dp_lag7")
+# Remove the specified variables from the dataset
+# final_df <- final_df[, !colnames(final_df) %in% variables_to_remove]
+
+# OR List of variables to keep based on LASSO RULE - Optimal Variables
+variables_to_keep <- c("SP500_lag2", "IndexDiv_lag1")
+
+# Keep only the specified variables
+final_df <- final_df[, colnames(final_df) %in% variables_to_keep]
+```
+
+#### Final Variables
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Verify the changes
+cat("Column in final_df:", colnames(final_df))
+```
+
+#### Summary statistics
+
+The Index of the xts object corresponds to the different dates.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Summary statistics
+summary(final_df)
+```
+
+## Neural Network Model
+
+TRY A SUMMARY OF THE 3 MODELS BELOW 
+
+#### Standardizing Data for Neural Network
+
+I standardize the whole data set, including the target variable. Standardizing the data is important in neural network models because it ensures all input features have similar scales, allowing the optimization algorithm, such as the Gradient Descent Algorithm, to converge more efficiently. The Gradient descent algorithm (explained in details below) adjusts the model's weights based on the direction of the steepest descent of the loss function (see gif below). When features have different scales, the gradients for larger-scale features dominate, which can cause the model to take uneven or erratic steps during optimization, thus making it harder for the algorithm to find the optimal solution. In predicting the S&P 500 index, standardization helps prevent features with larger values from dominating, leading to more balanced training. After standardization, predictions can be de-standardized for interpretation, making this process both effective for training and useful for real-world evaluation.
+
+Hence, to evaluate the performances of my model later, I will de-standardize the predictions and true values back.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Standardization Functions
+standardize <- function(x) {
+  (x - mean(x)) / sd(x)
+}
+
+standardize_df <- function(df) {
+  apply(df, 2, standardize)
+}
+
+destandardize <- function(x, original_mean, original_sd) {
+  x * original_sd + original_mean
+}
+
+# Evaluation Functions
+rmse <- function(actual, pred) {
+  sqrt(mean((actual - pred) ^ 2))
+}
+
+# Data Preparation
+standardized_final <- as.data.frame(standardize_df(final_df))
+```
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Prepare features and target variable
+features <- setdiff(names(standardized_final), c("SP500", "Unnamed: 0")) #removes "SP500" and "Unnamed: 0" from the list of column names.
+X <- as.matrix(standardized_final[, features])
+Y <- standardized_final$SP500
+```
+
+#### Data Splitting
+
+-   Training: from 1927 to 2003
+-   Testing: from 2003 to 2021
+
+I decide to split the dataset into training and testing sets based on a specified period. The training set includes data from 1927 to 2003, while the testing set includes data from 2003 to 2021.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Determine the indices for splitting by period
+T <- nrow(standardized_final)
+p_train <- 0.8
+
+T_train <- floor(p_train * T)
+
+# Split the dataset into training and testing sets by period
+train_index <- 1:T_train
+test_index <- (T_train + 1):T
+
+# Subset the data based on the indices
+X_train <- X[train_index, ] # 1927 to 2003
+Y_train <- Y[train_index]
+X_test <- X[test_index, ] # 2003 to 2021
+Y_test <- Y[test_index]
+```
+
+### Neural Network Architecture I
+
+#### SIMPLIFIED Neural Network with KERAS
+
+In this section, I define a function to create a neural network model with adjustable parameters such as the number of units per layer, learning rate, and optimizer type.
+
+The architecture of the neural network model below consists of three main layers. The input layer is defined to match the dimensions of the training data.
+
+The network includes two hidden layers, with the first layer having 64 units and the second layer having 32 units, both using the ReLU activation function to introduce non-linearity.
+
+The output layer has a single unit to produce a single output for the regression task. The model is compiled with the specified optimizer, which can be Adam, SGD, or RMSprop, and uses mean squared error (MSE) as the loss function.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Function to create a neural network model with adjusted parameters
+create_model <- function(units_per_layer = c(64, 32), learning_rate = 0.0005, optimizer_type = "adam", input_dim) {
+  
+  # Define the optimizer
+  optimizer <- switch(optimizer_type,
+                      "adam" = optimizer_adam(learning_rate = learning_rate),
+                      "sgd" = optimizer_sgd(learning_rate = learning_rate),
+                      "rmsprop" = optimizer_rmsprop(learning_rate = learning_rate),
+                      optimizer_adam(learning_rate = learning_rate))
+  
+  # Define the input layer
+  inputs <- layer_input(shape = c(input_dim))
+  
+  # Build the neural network
+  outputs <- inputs %>%
+    layer_dense(units = units_per_layer[1], activation = "relu") %>%
+    layer_dense(units = units_per_layer[2], activation = "relu") %>%
+    layer_dense(units = 1)  # Single output for regression task
+  
+  # Create the final model by specifying input and output tensors
+  model <- keras_model(inputs = inputs, outputs = outputs)
+  
+  # Compile the model with the chosen optimizer and loss function
+  model %>% compile(
+    optimizer = optimizer,
+    loss = "mean_squared_error",
+    metrics = list("mean_squared_error")
+  )
+  
+  return(model)
+}
+
+```
+
+I then set the parameters for the neural network, such as the number of units per layer, learning rate, and optimizer type. I then create the final model using these parameters.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Usage
+input_dim <- ncol(X_train)  # assuming X_train is already defined and prepared
+best_units <- c(256, 128)
+best_learning_rate <- 0.0005
+best_optimizer <- "adam"
+
+# Create and train the final model
+final_model <- create_model(best_units, best_learning_rate, best_optimizer, input_dim)
+```
+
+#### Final Model Summary
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Best model
+summary(final_model)
+```
+
+#### Train Neural Network with Early Stopping
+
+In this section, I train the neural network model using the training data. I include early stopping to prevent overfitting by monitoring the validation loss and stopping training if the loss does not improve by a certain margin for a specified number of epochs (here 30).
+
+```{r, warning=FALSE, message=FALSE, results='hide', echo=TRUE}
+# Define a custom callback to log the training history
+LossHistory <- R6::R6Class("LossHistory",
+  inherit = KerasCallback,
+  public = list(
+    losses = NULL,
+    val_losses = NULL,
+    on_train_begin = function(logs = NULL) {
+      self$losses <- c()
+      self$val_losses <- c()
+    },
+    on_epoch_end = function(epoch, logs = NULL) {
+      self$losses <- c(self$losses, logs$loss)
+      self$val_losses <- c(self$val_losses, logs$val_loss)
+    }
+  )
+)
+
+# Create the custom callback
+loss_history <- LossHistory$new()
+
+# Fit the model with early stopping and custom callback
+history <- final_model %>% fit(
+  X_train, Y_train,
+  validation_data = list(X_test, Y_test),
+  epochs = 200,
+  batch_size = 8,
+  verbose = 1,
+  callbacks = list(callback_early_stopping(monitor = "val_loss", patience = 30, min_delta = 0.001, restore_best_weights = TRUE), loss_history)
+)
+```
+
+#### Evaluate Neural Network Performance
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+
+# Plot the training history interactively
+fig <- plot_ly() %>%
+  add_trace(
+    x = seq_along(loss_history$losses), 
+    y = loss_history$losses, 
+    type = 'scatter', 
+    mode = 'lines+markers', 
+    name = 'Training Loss', 
+    line = list(color = '#3399FF'), 
+    marker = list(color = '#3399FF')
+  ) %>%
+  add_trace(
+    x = seq_along(loss_history$val_losses), 
+    y = loss_history$val_losses, 
+    type = 'scatter', 
+    mode = 'lines+markers', 
+    name = 'Validation Loss', 
+    line = list(color = '#66CC00'), 
+    marker = list(color = '#66CC00')
+  )
+
+fig <- fig %>% layout(
+  title = 'Training History', 
+  xaxis = list(title = 'Epochs'), 
+  yaxis = list(title = 'Loss')
+)
+
+fig
+```
+
+#### Predictions & RMSE
+
+Finally, I compute the predictions using the trained model and calculate the Root Mean Squared Error (RMSE) to evaluate the model's performance. The data is de-standardized before computing the RMSE.
+
+```{r, warning=FALSE, message=FALSE, results='hide', echo=TRUE}
+# Make predictions and compute RMSE
+predictions_standardize <- final_model %>% predict(X_test)
+
+# De-Standardize the Data
+predictions1 <- (predictions_standardize * 829.38452253) + 528.13614776 
+Y_test <- (Y_test * 829.38452253) + 528.13614776 
+
+final_rmse1 <- sqrt(mean((predictions1 - Y_test) ^ 2))
+
+### Saving the RMSE's in a dataframe for later comparison
+results_df <- data.frame(Model = character(), RMSE = numeric(), stringsAsFactors = FALSE)
+model_name1 <- "Simple Neural Network"
+results_df <- rbind(results_df, data.frame(Model = model_name1, RMSE = final_rmse1, stringsAsFactors = FALSE))
+
+```
+
+#### RMSE
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+
+cat("Simple Neural Network RMSE:",final_rmse1,"\n")
+
+```
+
+### Loss Function
+
+In this section, I aim to visualize the loss function through which the gradient descent algorithm optimizes the neural network. By considering only two features in my model (SP500_lag2 and IndexDiv_lag1), I can effectively represent the loss function in a 3D plot, providing an intuitive view of how it behaves. This visualization offers valuable insights into the optimization process and allows me better understand how gradient descent navigates towards minimizing the loss, by adjusting the weights accordingly. Such visualization helps me demystify the "black-box" nature of the training process by showing the relationship between the features and how the model finds the optimal solution.
+
+
+```{r, warning=FALSE, message=FALSE, results='hide', echo=TRUE}
+# Standardize function for input features (replicate neural network input format)
+standardize <- function(x, mean, std) {
+  return((x - mean) / std)
+}
+
+# Function to create the loss function (mean squared error) for plotting
+loss_function <- function(sp500_lag2, IndexDiv_lag1, model, means, sds, true_value) {
+  # Standardize the input features based on training data statistics
+  sp500_lag2_std <- standardize(sp500_lag2, means["sp500_lag2"], sds["sp500_lag2"])
+  IndexDiv_lag1_std <- standardize(IndexDiv_lag1, means["IndexDiv_lag1"], sds["IndexDiv_lag1"])
+  # Construct input matrix for the model
+  input_matrix <- matrix(c(sp500_lag2_std, IndexDiv_lag1_std), nrow = 1)
+  # Predict using the model
+  prediction <- model %>% predict(input_matrix)
+  # Compute mean squared error
+  mse <- mean((prediction - true_value)^2)
+  return(mse)
+}
+
+# Verify column names in X_train
+colnames(X_train)
+
+# Rename the columns of X_train for clarity if needed
+# Assuming the first and second columns of X_train are sp500_lag2 and IndexDiv_lag1 respectively
+colnames(X_train)[1] <- "sp500_lag2"
+colnames(X_train)[2] <- "IndexDiv_lag1"
+
+# Generate a grid of values for SP500_lag2 and IndexDiv_lag1 
+# (change dimensions (seq) here depending on the file imported) )
+sp500_lag2_values <- seq(-20, 20, length.out = 100)
+IndexDiv_lag1_values <- seq(-20, 20, length.out = 100)
+
+# Mean and standard deviation of training data features (should be calculated based on your training data)
+means <- colMeans(X_train)
+sds <- apply(X_train, 2, sd)
+```
+
+This chunks computes the loss for each pair of values in the grid created above using true values from the training set.
+
+The code is commented as it takes a long time to run. I saved the values into 2 csv files with different scales, a smaller of 20 sequences and a larger of 100 sequences.
+
+I import the csv file below directly.
+
+```{r, warning=FALSE, message=FALSE, results='hide', echo=TRUE}
+'
+# Create a data frame to hold the grid values and the corresponding loss
+loss_data <- expand.grid(SP500_lag2 = sp500_lag2_values, IndexDiv_lag1 = IndexDiv_lag1_values)
+# Compute the loss for each pair of values in the grid using true values from the training set
+loss_data$Loss <- apply(loss_data, 1, function(row) {
+  sp500_lag2 <- row["SP500_lag2"]
+  IndexDiv_lag1 <- row["IndexDiv_lag1"]
+  # Find the closest corresponding true value from the training set
+  true_value <- Y_train[which.min(abs(X_train[, "sp500_lag2"] - sp500_lag2) + abs(X_train[, "IndexDiv_lag1"] - IndexDiv_lag1))]
+  loss_function(sp500_lag2, IndexDiv_lag1, final_model, means, sds, true_value)
+})
+# Save the computed loss data to a CSV file
+write.csv(loss_data, "loss_data_20.csv", row.names = FALSE)
+'
+
+```
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Load the precomputed loss data from the CSV file 
+# (import loss_data_100 or loss_data_20 depending on desired scale)
+loss_data <- read.csv("/Users/mathieu26/Desktop/DSDM-BSE/Term_3/Machine_Learning_Finance/Assignment1/loss_data_20.csv")
+
+# Reshape data for plotting
+loss_matrix <- acast(loss_data, SP500_lag2 ~ IndexDiv_lag1, value.var = "Loss")
+
+```
+
+A neural network trains through a process known as gradient descent, an optimization algorithm designed to minimize the loss function. Initially, the neural network starts with random weights. During each iteration, or epoch, the input data is passed through the network to make predictions. The loss function then calculates the difference between these predictions and the actual target values, quantifying how well the model is performing.
+
+![Gradient Descent Optimization Algorithm](/Users/mathieu26/Desktop/Github Pages/testwebsite5.github.io/data_science/example1/Gradient_Descent_Gif.gif)
+
+This process involves a forward pass, where the input data moves through the network layers to generate predictions. The loss is then computed based on these predictions. Next, a backward pass, or backpropagation, occurs. Here, the network calculates the gradients of the loss function with respect to each weight. These gradients indicate the direction and magnitude of the weight adjustments needed to reduce the loss. The weights are then updated in the opposite direction of the gradient. This cycle repeats over many epochs, iteratively refining the weights to reduce the loss function to its minimum value, indicating an effectively trained model.
+
+In the context of a neural network, the loss function measures how closely the model's predictions align with the actual target values. During training, the objective is to adjust the network's weights to minimize this loss function. Visualizing the loss function offers insights into how the model's performance changes with varying weight values. Here, the loss function considered is the RMSE.
+
+ADD TITLE TO THE PLOT
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Interactive Plot
+# Convert the loss_matrix to a format suitable for plotly
+z_values <- as.matrix(loss_matrix)
+
+# Create an interactive 3D plot
+plot_ly(x = sp500_lag2_values, y = IndexDiv_lag1_values, z = z_values, type = "surface",
+        color.palette = viridis) %>%
+  layout(scene = list(xaxis = list(title = 'SP500 Lag 2'),
+                      yaxis = list(title = 'IndexDiv Lag 1'),
+                      zaxis = list(title = 'Loss (RMSE)')))
+
+```
+
+The plot above provides an interactive 3D visualization of the loss function for the neural network model. It illustrates how the loss function, represented by the Root Mean Squared Error (RMSE), varies with different values of two input features, SP500 Lag 2 and IndexDiv Lag 1. The X-axis represents different values of the SP500 Lag 2 feature, the Y-axis represents different values of the IndexDiv Lag 1 feature, and the Z-axis shows the corresponding loss values computed by the neural network model for each combination of SP500 Lag 2 and IndexDiv Lag 1.
+
+The primary goal of training the neural network is to identify the weight combination that minimizes the loss function. This plot provides a visual representation of the optimization landscape that the neural network explores during training. By examining the regions of the plot where the loss is minimized (lower values on the Z-axis), we can see the optimal weight configurations that the neural network aims to achieve through gradient descent.
+
+### Neural Network Architecture II
+
+Again, I use the same methodology as previously to split the DataFrame into training and testing sets. This approach ensures that all features can be properly re-standardized, given that, to compute the RMSE previously, I only de-standardized the target values.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, results='show'}
+
+# Prepare features and target variable
+features <- setdiff(names(standardized_final), c("SP500", "Unnamed: 0"))
+X <- as.matrix(standardized_final[, features])
+Y <- standardized_final$SP500
+
+# Determine the indices for splitting by period
+T <- nrow(standardized_final)
+p_train <- 0.8
+T_train <- floor(p_train * T)
+
+# Split the dataset into training and testing sets by period
+train_index <- 1:T_train
+test_index <- (T_train + 1):T
+
+# Subset the data based on the indices
+X_train <- X[train_index, ] # 1927 to 2003
+Y_train <- Y[train_index]
+X_test <- X[test_index, ] # 2003 to 2021
+Y_test <- Y[test_index]
+```
+
+#### Neural Network with Multi-Start Optimization
+
+A multi-start in a neural network model refers to the practice of training the model multiple times, each time with different randomly initialized weights. This approach is used to address the issue of local minima in the optimization of neural networks. Because the loss function of a neural network can have many local minima (see picture of a loss function with multiple local minima), starting the training process from different points can help find a better (often lower) minimum of the loss function.
+
+![Loss function with multiple local minima](/Users/mathieu26/Desktop/Github Pages/testwebsite5.github.io/data_science/example1/Gradient_Descent3.png)
+
+When using multi-start, the model is trained several times, each time beginning with a different set of initial weights. The result is multiple trained models, each potentially having converged to a different local minimum. The final model is selected based on the one that achieves the best performance on a validation set.
+
+I use the same architecture as for my previous model but in this case I add a multi start parameter and define the optimal learning rate (the step size of each update in the gradient descent algorithm).
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Function to create a neural network model with adjusted parameters
+create_model <- function(units_per_layer = c(64, 32), learning_rate = 0.0005, optimizer_type = "adam", input_dim) {
+  
+  # Define the optimizer
+  optimizer <- switch(optimizer_type,
+                      "adam" = optimizer_adam(learning_rate = learning_rate),
+                      "sgd" = optimizer_sgd(learning_rate = learning_rate),
+                      "rmsprop" = optimizer_rmsprop(learning_rate = learning_rate),
+                      optimizer_adam(learning_rate = learning_rate))
+  
+  # Define the input layer
+  inputs <- layer_input(shape = c(input_dim))
+  
+  # Build the neural network
+  outputs <- inputs %>%
+    layer_dense(units = units_per_layer[1], activation = "relu") %>%
+    layer_dense(units = units_per_layer[2], activation = "relu") %>%
+    layer_dense(units = 1)  # Single output for regression task
+  
+  # Create the final model by specifying input and output tensors
+  model <- keras_model(inputs = inputs, outputs = outputs)
+  
+  # Compile the model with the chosen optimizer and loss function
+  model %>% compile(
+    optimizer = optimizer,
+    loss = "mean_squared_error",
+    metrics = list("mean_squared_error")
+  )
+  
+  return(model)
+}
+
+```
+
+#### Function to Perform Multi-Start Optimization:
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Function to perform multi-start optimization
+multi_start_training <- function(X_train, Y_train, X_test, Y_test, units_per_layer, learning_rate, optimizer_type, batch_size, num_starts) {
+  best_loss <- Inf
+  best_model <- NULL
+  set.seed(123) # Ensuring reproducibility
+  plot_list <- list()
+  
+  for (start in 1:num_starts) {
+    cat("Start number:", start, "\n")
+    
+    # Set different seeds for each start
+    tensorflow::set_random_seed(start)
+    
+    model <- create_model(units_per_layer, learning_rate, optimizer_type, input_dim = ncol(X_train))
+    
+    # Define a custom callback to log the training history
+    LossHistory <- R6::R6Class("LossHistory",
+      inherit = KerasCallback,
+      public = list(
+        losses = NULL,
+        val_losses = NULL,
+        on_train_begin = function(logs = NULL) {
+          self$losses <- c()
+          self$val_losses <- c()
+        },
+        on_epoch_end = function(epoch, logs = NULL) {
+          self$losses <- c(self$losses, logs$loss)
+          self$val_losses <- c(self$val_losses, logs$val_loss)
+        }
+      )
+    )
+    
+    # Create the custom callback
+    loss_history <- LossHistory$new()
+    
+    # Train the model with early stopping
+    history <- model %>% fit(
+      X_train, Y_train,
+      validation_data = list(X_test, Y_test),
+      epochs = 200,
+      batch_size = batch_size,
+      verbose = 1,
+      callbacks = list(callback_early_stopping(monitor = "val_loss", patience = 25, min_delta = 0.001, restore_best_weights = TRUE), loss_history)
+    )
+    
+    # Plot the training history for this start
+    p <- plot_ly() %>%
+      add_trace(x = seq_along(loss_history$losses), y = loss_history$losses, type = 'scatter', mode = 'lines+markers', name = paste('Training Loss', start), line = list(color = '#3399FF'), marker = list(color = '#3399FF')) %>%
+      add_trace(x = seq_along(loss_history$val_losses), y = loss_history$val_losses, type = 'scatter', mode = 'lines+markers', name = paste('Validation Loss', start), line = list(color = '#66CC00'), marker = list(color = '#66CC00')) %>%
+      layout(title = paste('Training History for Start', start), xaxis = list(title = 'Epochs'), yaxis = list(title = 'Loss'))
+    
+    # Save the plot to the list
+    plot_list[[start]] <- p
+    
+    # Evaluate the model on validation data
+    evaluation <- model %>% evaluate(X_test, Y_test, verbose = 0)
+    val_loss <- evaluation[1]
+    
+    # Save the model if it's the best one so far
+    if (val_loss < best_loss) {
+      best_loss <- val_loss
+      best_model <- model
+    }
+  }
+  
+  return(list(model = best_model, plots = plot_list))
+}
+```
+
+#### Best Parameters Values
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Defining the best parameters values
+best_units <- c(256, 128)
+best_learning_rate <- 0.0005
+best_optimizer <- "adam"
+best_batch_size <- 16
+num_starts <- 10  # Number of random starts
+```
+
+#### Multi-Start Training
+
+```{r, warning=FALSE, message=FALSE, results='hide', echo=TRUE}
+# Perform multi-start training
+results <- multi_start_training(X_train, Y_train, X_test, Y_test, best_units, best_learning_rate, best_optimizer, best_batch_size, num_starts)
+
+```
+
+#### Final Model Summary
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Best model
+final_model <- results$model
+final_model
+```
+
+#### Training Histories for 10 Multi-Start
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# List of plots for each start
+plot_list <- results$plots
+
+# Display all plots in one combined plot
+combined_plot <- subplot(plot_list, nrows = 5, margin = 0.05)
+combined_plot
+```
+
+#### Predictions and RMSE
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Make predictions and compute RMSE
+predictions_standardized <- final_model %>% predict(X_test)
+
+# Assuming you have the means and standard deviations used for normalization
+predictions1 <- (predictions_standardized * 829.38452253) + 528.13614776 
+Y_test <- (Y_test * 829.38452253) + 528.13614776 
+
+final_rmse2 <- sqrt(mean((predictions1 - Y_test) ^ 2))
+
+# Saving the RMSE
+model_name2 <- "Neural Network with Multi-Start"
+results_df <- rbind(results_df, data.frame(Model = model_name2, RMSE = final_rmse2, stringsAsFactors = FALSE))
+```
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+cat("Neural Network 2 RMSE:",final_rmse2 ,"\n")
+```
+
+### Neural Network Architecture III
+#### Adding Hyperparameter Tuning
+
+In this section, I use the same neural network architecture as ... but adds an hyperparameter tuning. 
+
+Again, I re-define the training and testing set using the same methodology as before.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Prepare features and target variable
+features <- setdiff(names(standardized_final), c("SP500", "Unnamed: 0"))
+X <- as.matrix(standardized_final[, features])
+Y <- standardized_final$SP500
+
+# Determine the indices for splitting by period
+T <- nrow(standardized_final)
+p_train <- 0.8
+
+T_train <- floor(p_train * T)
+
+# Split the dataset into training and testing sets by period
+train_index <- 1:T_train
+test_index <- (T_train + 1):T
+
+# Subset the data based on the indices
+X_train <- X[train_index, ] # 1927 to 2003
+Y_train <- Y[train_index]
+X_test <- X[test_index, ] # 2003 to 2021
+Y_test <- Y[test_index]
+
+```
+
+```{r, warning=FALSE, message=FALSE, results='hide', echo=TRUE}
+# Function to standardize data (mean-centering)
+standardize <- function(x) {
+  return((x - mean(x)) / sd(x))
+}
+
+normalize_target <- function(y) {
+  (y - Y_train_mean) / Y_train_sd
+}
+
+denormalize_target <- function(y_normalized) {
+  (y_normalized * Y_train_sd) + Y_train_mean
+}
+```
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Function to create a neural network model with adjusted parameters
+create_model <- function(units_per_layer = c(64, 32), dropout_rate = 0.2, 
+                         learning_rate = 0.0005, optimizer_type = "adam", input_dim) {
+  
+  # Define the optimizer with reduced learning rate
+  optimizer <- switch(optimizer_type,
+                      "adam" = optimizer_adam(learning_rate = learning_rate),
+                      "sgd" = optimizer_sgd(learning_rate = learning_rate),
+                      "rmsprop" = optimizer_rmsprop(learning_rate = learning_rate),
+                      optimizer_adam(learning_rate = learning_rate))
+  
+  # Define the input layer
+  inputs <- layer_input(shape = c(input_dim))
+  
+  # Build the neural network with adjusted dropout and regularization
+  outputs <- inputs %>%
+    layer_dense(units = units_per_layer[1], activation = "relu", kernel_regularizer = regularizer_l2(0.001)) %>%
+    layer_dropout(rate = dropout_rate) %>%
+    layer_dense(units = units_per_layer[2], activation = "relu", kernel_regularizer = regularizer_l2(0.001)) %>%
+    layer_dropout(rate = dropout_rate) %>%
+    layer_dense(units = 1)  # Single output (regression task)
+  
+  # Create the final model by specifying input and output tensors
+  model <- keras_model(inputs = inputs, outputs = outputs)
+  
+  # Compile the model with the chosen optimizer and loss function
+  model %>% compile(
+    optimizer = optimizer,
+    loss = "mean_squared_error",
+    metrics = list("mean_squared_error")
+  )
+  
+  return(model)
+}
+```
+
+#### Hyperparameters Grid Search Function
+
+I optimize the model by finding the best combination of units per layer, dropout rate, learning rate, and other hyperparameters through grid search.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Function to perform grid search over different hyperparameters
+optimize_keras_model <- function(X_train, Y_train, X_test, Y_test, units_options, dropout_options, 
+                                 learning_rate_options, optimizer_options, batch_size_options) {
+  
+  results <- list()
+  
+  for (units_per_layer in units_options) {
+    for (dropout_rate in dropout_options) {
+      for (learning_rate in learning_rate_options) {
+        for (optimizer_type in optimizer_options) {
+          for (batch_size in batch_size_options) {
+            model <- create_model(units_per_layer, dropout_rate, learning_rate, optimizer_type, input_dim = ncol(X_train))
+            
+            # Train the model with the specified batch size
+            model %>% fit(
+              X_train, Y_train,
+              validation_data = list(X_test, Y_test),
+              epochs = 50, batch_size = batch_size,
+              verbose = 0
+            )
+            
+            # Evaluate the model on validation data, return a list of metric values
+            evaluation <- model %>% evaluate(X_test, Y_test, verbose = 0)
+            val_loss <- evaluation[1]  # Loss is the first element
+            results[[paste("units", paste(units_per_layer, collapse = "-"), "dropout", dropout_rate,
+                           "lr", learning_rate, "opt", optimizer_type, "batch", batch_size)]] <- val_loss
+          }
+        }
+      }
+    }
+  }
+  
+  return(results)
+}
+
+```
+
+#### Grid Search Space
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Define grid search space for hyperparameters
+units_options <- list(c(32, 16), c(64, 32), c(128, 64), c(256, 128), c(512, 256))
+dropout_options <- c(0.1, 0.3, 0.5)
+learning_rate_options <- c(0.0001, 0.0002 , 0.0003, 0.0005)
+optimizer_options <- c("adam")
+batch_size_options <- c(8, 16, 32)
+```
+
+#### Hyperparameter Tuning
+
+```{r, warning=FALSE, message=FALSE, results='hide', echo=TRUE}
+'
+# Perform hyperparameter tuning (Commented due to running time)
+results <- optimize_keras_model(X_train, Y_train, X_test, Y_test, units_options, dropout_options, learning_rate_options, optimizer_options, batch_size_options)
+print(results)
+'
+```
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Extract the losses from the results
+losses <- unlist(lapply(results, `[[`, "loss"))
+
+# Find the configuration with the lowest loss
+optimal_config <- names(which.min(losses))
+lowest_loss <- min(losses)
+
+# Print the optimal configuration and its corresponding loss
+print(paste("Optimal configuration:", optimal_config))
+print(paste("Lowest loss:", lowest_loss)) # units 512-256 dropout 0.3 lr 5e-04 opt adam batch 8
+```
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Analyze the results and select the best parameters
+best_units <- c(512,256)
+best_dropout <- 0.3
+best_learning_rate <- 0.0005
+best_optimizer <- "adam"
+best_batch_size <- 8
+```
+
+#### Final Model Training
+
+Based on the best hyperparameters found, I train the final neural network model.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Train the final model with the optimal hyperparameters on the training set
+final_model <- create_model(best_units, best_dropout, best_learning_rate, best_optimizer, input_dim = ncol(X_train))
+```
+
+```{r, warning=FALSE, message=FALSE, results='hide', echo=TRUE}
+# Callback for early stopping
+early_stopping_callback <- callback_early_stopping(
+  monitor = "val_loss",    # Monitor the validation loss
+  patience = 20,           # Increase or adjust the patience
+  min_delta = 0.001,       # Minimum change to qualify as an improvement
+  restore_best_weights = TRUE  # Optionally restore model weights from the epoch with the best value of the monitored quantity
+)
+
+# Fit the model with the early stopping callback
+history <- final_model %>% fit(
+  X_train, Y_train,
+  validation_data = list(X_test, Y_test),
+  epochs = 200,            # You might want to increase the max epochs since we're using early stopping
+  batch_size = best_batch_size,
+  verbose = 1,
+  callbacks = list(early_stopping_callback)
+)
+```
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Extract the training history
+df <- data.frame(
+  epoch = 1:length(history$metrics$loss),
+  loss = history$metrics$loss,
+  val_loss = history$metrics$val_loss
+)
+
+# Plot the training history using plotly
+fig <- plot_ly(df, x = ~epoch) %>%
+  add_trace(y = ~loss, type = 'scatter', mode = 'lines+markers', name = 'Training Loss', 
+            line = list(color = '#3399FF'), marker = list(color = '#3399FF')) %>%
+  add_trace(y = ~val_loss, type = 'scatter', mode = 'lines+markers', name = 'Validation Loss', 
+            line = list(color = '#66CC00'), marker = list(color = '#66CC00')) %>%
+  layout(title = 'Training History',
+         xaxis = list(title = 'Epoch'),
+         yaxis = list(title = 'Loss'),
+         legend = list(x = 0.1, y = 0.9))
+
+# Display the interactive plot
+fig
+```
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Make predictions on the test set
+predictions_normalized <- final_model %>% predict(X_test)
+
+# De-normalize Values
+predictions2 <- (predictions_normalized * 829.38452253 ) + 528.13614776 
+Y_test <- (Y_test * 829.38452253 ) + 528.13614776 
+
+# Compute RMSE
+final_rmse3 <- sqrt(mean((predictions2 - Y_test) ^ 2))
+
+# Saving the RMSE
+model_name3 <- "Neural Network with Hyperparameter Tuning"
+results_df <- rbind(results_df, data.frame(Model = model_name3, RMSE = final_rmse3, stringsAsFactors = FALSE))
+```
+
+#### RMSE
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+cat("Neural Network 3 RMSE:",final_rmse3)
+```
+
+This score suggest that ...
+
+## Gaussian Process Model
+
+In this section, I apply a Gaussian Process Regression model to predict the S&P 500 index.
+Similar to before, I re-define the training and testing set using the same methodology.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+
+# Prepare features and target variable
+features <- setdiff(names(standardized_final), c("SP500", "Unnamed: 0"))
+X <- as.matrix(standardized_final[, features])
+Y <- standardized_final$SP500
+
+# Determine the indices for splitting by period
+T <- nrow(standardized_final)
+p_train <- 0.8
+
+T_train <- floor(p_train * T)
+
+# Split the dataset into training and testing sets by period
+train_index <- 1:T_train
+test_index <- (T_train + 1):T
+
+# Subset the data based on the indices
+X_train <- X[train_index, ] # 1927 to 2003
+Y_train <- Y[train_index]
+X_test <- X[test_index, ] # 2003 to 2021
+Y_test <- Y[test_index]
+
+```
+
+For this model, I combine the X_train and Y_train into a single data frame as the model function takes as parameter the whole training set.
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Combine X_train and Y_train into a single data frame
+train_data <- data.frame(X_train, TARGET = Y_train)
+```
+
+Given that the SP500 stock market index is non-stationary, i.e its values fluctuate in ways that don't remain consistent over time, I define a non stationary kernel function that is later included in the 'gausspr' function. 
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Non-stationary 
+MyKer_NoStat <- function(x,y) {
+  2*exp(sum(abs(x-y))/(-2*1.5^2)) + 1.5*sum(x*y)
+}
+
+class(MyKer_NoStat) <- "kernel"
+```
+
+#### Fitting the model
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Fit the model, with non stationary kernel
+gpfit = gausspr(TARGET ~ ., data = train_data,
+                type="regression",
+                #kernel="tanhdot", 
+                #kernel= "rbfdot", #"vanilladot",
+                kernel= MyKer_NoStat,  
+                #kpar = list(sigma = 0.4), #list of kernel hyper-parameters for rbf
+                ## if you make it constant value then does not make mle estimation of sigma
+                #kpar=list(scale=2,offset=2), ##for tanh
+                var = 0.003 # the initial noise variance: 0.001 default min value
+)
+```
+
+#### Predictions on the test set
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+gpretpred <- predict(gpfit, X_test)
+
+# De-normalize Values
+gpretpred <- (gpretpred * 829.38452253 ) + 528.13614776 
+Y_test <- (Y_test * 829.38452253 ) + 528.13614776 
+
+final_rmse4 <- sqrt(mean((gpretpred - Y_test) ^ 2))
+
+# Saving the RMSE
+model_name4 <- "Gaussian Process"
+results_df <- rbind(results_df, data.frame(Model = model_name4, RMSE = final_rmse4, stringsAsFactors = FALSE))
+```
+
+#### RMSE
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+cat("Gaussian Process RMSE:",final_rmse4)
+```
+
+## Results Summary
+
+#### Models Performances Summary
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+kable(results_df, col.names = c("Model Name", "RMSE"), caption = "Model Performance Summary")
+```
+
+### Models Performances Vizualization
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Convert SP500 xts to a data frame
+sp500_df <- data.frame(Date = index(SP500), SP500 = as.numeric(coredata(SP500)))
+
+
+# Define the start and end dates for predictions !!! CAN CHANGE DEPENDING ON THE LAGS CREATED
+# NEED TO BE ADJUSTED BASE ON X_TEST/Y_TEST PERIOD
+start_date <- as.Date("2003-03-01")
+end_date <- as.Date("2021-12-01")
+
+# Extract the corresponding dates from SP500
+prediction_dates <- index(SP500)[index(SP500) >= start_date & index(SP500) <= end_date]
+
+# Convert prednet to a data frame
+# prednet_df <- data.frame(Date = prediction_dates, prednet = as.numeric(prednet[, 1]))
+
+# Convert gpretpred to a data frame
+gpretpred_df <- data.frame(Date = prediction_dates, gpretpred = as.numeric(gpretpred[, 1]))
+
+# Convert predictions (Neural Network with KERAS) to a data frame
+predictions_df <- data.frame(Date = prediction_dates, predictions1 = as.numeric(predictions1[, 1]))
+
+# Convert 2ND predictions (Neural Network with KERAS) to a data frame
+predictions_df2 <- data.frame(Date = prediction_dates, predictions2 = as.numeric(predictions2[, 1]))
+
+# Merge all datasets into one data frame on 'Date'
+all_data <- reduce(list(sp500_df, gpretpred_df, predictions_df, predictions_df2), full_join, by = "Date")
+
+
+```
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+ggplot(data = all_data, aes(x = Date)) +
+  geom_line(aes(y = SP500, color = "Actual SP500"), size = 0.5) +
+  #geom_line(aes(y = prednet, color = "Neural Network Prediction"),  size = 0.3, na.rm = TRUE) +
+  geom_line(aes(y = gpretpred, color = "Gaussian Process Prediction"), size = 0.3, na.rm = TRUE) +
+  geom_line(aes(y = predictions1, color = "Simplified Neural Network Prediction with KERAS"), size = 0.3, na.rm = TRUE) +
+  geom_line(aes(y = predictions2, color = "Neural Network Prediction with KERAS"), size = 0.3, na.rm = TRUE) +
+
+  scale_color_manual(values = c(
+    "Actual SP500" = "#003049",  # Greenish shade
+    #"Neural Network Prediction" = "#d62828",  # Dark blue
+    "Gaussian Process Prediction" = "#f77f00",  # Bright red
+    "Simplified Neural Network Prediction with KERAS" = "#5c0099",  # Yellow
+    "Neural Network Prediction with KERAS" = "#00a6fb"  # Yellow
+  )) +
+  labs(title = "S&P 500 Index and Predictions (1993-2021)", x = "Date", y = "Index Value") +
+  theme_minimal() +
+  theme(legend.title = element_blank(), legend.position = "top")
+
+```
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# ZOOM on the Updated plotting:
+# Assuming 'Date' is in a date format or can be coerced into one
+all_data$Date <- as.Date(all_data$Date)
+
+# Filter data to restrict the plot from 2000 to 2021
+filtered_data <- all_data %>% 
+  filter(Date >= as.Date("2000-01-01") & Date <= as.Date("2021-12-31"))
+```
+
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# 2. Updated plotting with filtered data
+ggplot(data = filtered_data, aes(x = Date)) +
+  geom_line(aes(y = SP500, color = "Actual SP500"), size = 0.5) +
+  #geom_line(aes(y = prednet, color = "Neural Network Prediction"),  size = 0.3, na.rm = TRUE) +
+  geom_line(aes(y = gpretpred, color = "Gaussian Process Prediction"), size = 0.3, na.rm = TRUE) +
+  geom_line(aes(y = predictions1, color = "Simplified Neural Network Prediction with KERAS"), size = 0.3, na.rm = TRUE) +
+  geom_line(aes(y = predictions2, color = "Neural Network Prediction with KERAS"), size = 0.3, na.rm = TRUE) +
+
+  scale_color_manual(values = c(
+    "Actual SP500" = "#003049",  # Dark blue
+    #"Neural Network Prediction" = "#d62828",  # Red
+    "Gaussian Process Prediction" = "#f77f00",  # Orange
+    "Simplified Neural Network Prediction with KERAS" = "#5c0099",  # Purple
+    "Neural Network Prediction with KERAS" = "#00a6fb"  # Light blue
+  )) +
+  labs(title = "ZOOM: S&P 500 Index and Predictions (2000-2021)", x = "Date", y = "Index Value") +
+  theme_minimal() +
+  theme(legend.title = element_blank(), legend.position = "top")
+```
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Create a unified dataset where each row includes all predictions for each date
+filtered_data <- filtered_data %>%
+  group_by(Date) %>%
+  summarise(
+    SP500 = first(SP500),
+    #prednet = first(prednet),
+    gpretpred = first(gpretpred),
+    predictions1 = first(predictions1),
+    predictions2 = first(predictions2)
+  )
+```
+
+
+```{r, warning=FALSE, message=FALSE, results='hide', echo=TRUE}
+# Create the ggplot object
+p <- ggplot(data = filtered_data, aes(x = Date)) +
+  geom_line(aes(y = SP500, color = "Actual SP500"), size = 0.5) +
+  #geom_line(aes(y = prednet, color = "Neural Network Prediction"), size = 0.3) +
+  geom_line(aes(y = gpretpred, color = "Gaussian Process Prediction"), size = 0.3) +
+  geom_line(aes(y = predictions1, color = "Simplified Neural Network Prediction with KERAS"), size = 0.3) +
+  geom_line(aes(y = predictions2, color = "Neural Network Prediction with KERAS"), size = 0.3) +
+  scale_color_manual(values = c(
+    "Actual SP500" = "#003049",
+    #"Neural Network Prediction" = "#d62828",
+    "Gaussian Process Prediction" = "#f77f00",
+    "Simplified Neural Network Prediction with KERAS" = "#5c0099",
+    "Neural Network Prediction with KERAS" = "#00a6fb"
+  )) +
+  labs(title = "Interactive: S&P 500 Index and Predictions (2000-2021)", x = "Date", y = "Index Value") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# Convert to plotly interactive plot, adding custom tooltips
+p_plotly <- ggplotly(p, tooltip = c("y", "color")) %>% 
+  layout(hovermode = 'x unified') %>%
+  add_trace(
+    x = ~Date, y = ~SP500, type = 'scatter', mode = 'lines',
+    text = ~paste('Date:', Date,
+                  '<br>SP500:', SP500,
+                  #'<br>Neural Net:', prednet,
+                  '<br>Gaussian Process:', gpretpred,
+                  '<br>Neural Net KERAS:', predictions2,
+                  '<br>Simplified Neural Net KERAS:', predictions1),
+    hoverinfo = 'text',
+    line = list(color = '#003049')
+  )
+```
+
+```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
+# Display the plot
+library("plotly")
+p_plotly
+```
+
+## Summary
+### Predicting the S&P 500 Stock Market Index
+
+This project set out to predict the S&P 500 index using various machine learning models. I explored multiple approaches, including neural networks with different architectures and optimization techniques, as well as Gaussian Process Regression. The results provide valuable insights into the strengths and weaknesses of each method and highlight the importance of model complexity, parameter optimization, and feature engineering in time series forecasting.
+
+### Models Performance Overview 
+
+The four models evaluated were:
+
+Simple Neural Network - This model used a basic architecture with two hidden layers of moderate complexity. It was trained using early stopping to avoid overfitting. The RMSE for this model was relatively high, reflecting limitations in accurately capturing the complexity of the S&P 500 data, which is influenced by numerous economic factors.
+
+Neural Network with Multi-Start Optimization - The multi-start approach involved training the model multiple times from different initial weight configurations to avoid poor local minima. This resulted in a modest improvement in RMSE compared to the simple neural network, indicating that finding better initial conditions helps improve model generalizability.
+
+Complex Neural Network with Hyperparameter Tuning - The model used a deeper architecture, incorporating techniques like dropout and kernel regularization, and optimized hyperparameters through a grid search. This model achieved the lowest RMSE among the neural networks, demonstrating that in this case an optimized and more sophisticated architecture better captured the patterns within the data.
+
+Gaussian Process Regression - This non-parametric model was applied with a custom non-stationary kernel to capture the non-linearities of the stock market. Although the Gaussian Process model had a slightly higher RMSE compared to the best neural network, it provided an intuitive approach to modeling uncertainty, which can be valuable in financial contexts where risk estimation is crucial.
+
+### Key Insights and Takeaways
+
+Feature Engineering Matters - Proper feature selection and engineering played a pivotal role in model performance. Lagged features of the S&P 500 and dividend variables proved to be most informative for prediction. Methods like LASSO, Ridge Regression, and Boruta were effective in selecting features, helping reduce model complexity without sacrificing accuracy.
+
+Optimization Techniques - The use of multi-start optimization showed the benefits of avoiding poor local minima in neural network training, and the final model with hyperparameter tuning demonstrated that carefully selecting model parameters (e.g., number of layers, learning rate, dropout rate) can lead to significant performance gains.
+
+Importance of Regularization - Adding dropout and kernel regularization helped mitigate overfitting in the neural network models. This allowed the more complex models to generalize better, especially when dealing with high-dimensional data that may otherwise lead to overfitting.
+
+### Conclusion
+
+The financial market is inherently volatile and influenced by a myriad of factors, making stock market prediction a challenging task. The results of this study underline that while more complex models (like deep neural networks) can indeed capture intricate patterns in the data, simpler models (like Gaussian Processes) offer valuable interpretability that can be crucial for understanding the risks involved in stock market investments.
+
+For future work, incorporating more macroeconomic indicators and using advanced techniques such as Long Short-Term Memory (LSTM) networks could further improve prediction accuracy. Additionally, the combination of model predictions, such as using an ensemble approach, may enhance the robustness of the forecasts.
+
+
