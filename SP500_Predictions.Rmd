@@ -17,11 +17,26 @@ output:
 knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = TRUE)
 ```
 
-![](/Users/mathieu26/Desktop/Github Pages/testwebsite5.github.io/data_science/example1/Stock_Market_Index.jpeg)
+![](/Users/mathieu26/Desktop/Github%20Pages/testwebsite5.github.io/data_science/example1/Stock_Market_Index.jpeg)
 
 ## Introduction
 
-XXX
+Can decades of macroeconomic data tell us something meaningful about where the stock market is heading? That question sits at the heart of this project.
+
+Predicting the S&P 500 stock market index has long been one of the most studied — and most humbling — problems in empirical finance. Markets are noisy, driven by sentiment, geopolitical shocks, and forces that no model can fully anticipate. And yet, a rich body of academic research suggests that certain financial and macroeconomic variables do carry predictive signal, at least over longer horizons. Understanding *which* variables matter, *how* to extract that signal, and *which* methods are best suited to do so is both a practical and intellectually fascinating challenge.
+
+This project was born out of a desire to learn by doing. Rather than reviewing methods in the abstract, the goal was to build a full, end-to-end predictive pipeline — from raw data to model evaluation — using real financial data and a diverse set of machine learning techniques. It is also intended to serve as a teaching resource: each step is documented and explained so that anyone curious about applied machine learning in finance can follow along, understand the reasoning behind each decision, and adapt the methods to their own questions.
+
+The analysis is built around the **Goyal-Welch (2022) monthly dataset**, a widely used benchmark in the return predictability literature that aggregates a broad set of macroeconomic and financial predictors spanning nearly a century of U.S. market data (November 1926 to December 2021). From this dataset, a range of financial indicators are constructed — including log returns, the dividend-price ratio, earnings yield, dividend yield, the default yield spread, and the log equity premium — which serve as the building blocks of the predictive models.
+
+The analysis follows a structured, step-by-step pipeline designed to be both rigorous and transparent:
+
+1.  **Data Cleaning & Preprocessing** — raw data is cleaned, transformed, and enriched with derived financial indicators.
+2.  **Exploratory Data Analysis** — time series plots, return distributions, and a correlation heatmap are used to uncover structure and relationships in the data.
+3.  **Feature Selection (Round 1)** — Lasso, Ridge, and Boruta (Random Forest-based) methods are applied to identify the most relevant predictors from the original variable set.
+4.  **Lag Identification** — VAR model selection criteria and individual ARIMA models are used to determine the optimal number of lags for each variable.
+5.  **Feature Engineering & Selection (Round 2)** — lagged versions of the selected features are created, and a second round of feature selection is performed to retain only the most informative lags.
+6.  **Predictive Modeling** — multiple machine learning models are trained and evaluated on the final feature set to forecast the S&P 500 index.
 
 #### Loading Libraries
 
@@ -72,35 +87,33 @@ df <- read.csv('/Users/mathieu26/Desktop/DSDM-BSE/Term_3/Machine_Learning_Financ
 Initial exploration of the dataset. In this part, I look at the first few rows, and examine basic statistics.
 
 #### Data Overview
+
 ```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
 # View the first few rows of the dataset
-head(gw2022)
+knitr::kable(head(gw2022))
 ```
-CHANGE TABLE TO PRETTIER
+
 #### Data Structure
 
 ```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
 # Structure of the dataset
 str(gw2022)
 ```
-CHANGE TABLE TO PRETTIER
 
 #### Summary Statistics
 
 ```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
 # Summary statistics
-summary(gw2022)
+knitr::kable(summary(gw2022))
 ```
-CHANGE TABLE TO PRETTIER
 
 #### Missing Values Statistics
 
 ```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
 # Number of missing values per column
 missing_values <- sapply(gw2022, function(x) sum(is.na(x)))
-missing_values
+knitr::kable(data.frame(Variable = names(missing_values), Missing_Values = as.integer(missing_values)), row.names = FALSE)
 ```
-CHANGE TABLE TO PRETTIER
 
 #### Variable Names
 
@@ -108,7 +121,6 @@ CHANGE TABLE TO PRETTIER
 # Printing the name of the variables
 print(names(gw2022))
 ```
-CHANGE TABLE TO PRETTIER
 
 ## Data Cleaning & Preprocessing
 
@@ -135,7 +147,7 @@ gw2022$Date <- ymd(paste0(gw2022$Date, "01"))
 # Filter rows for the period between January 1927 (-1 month that will be removed when computing returns) and December 2021
 gw2022 <- gw2022 %>%
   filter(Date >= as.Date("1926-11-30") & 
-           Date <= as.Date("2021-12-31"))
+          Date <= as.Date("2021-12-31"))
 
 #df=df['1927/2021']
 ```
@@ -234,7 +246,7 @@ gw2022 <- gw2022 %>%
 
 #### Verify missing values
 
-After having created and transformed the initial variables, I check again for missing values. 
+After having created and transformed the initial variables, I check again for missing values.
 
 ```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
 # Last Check at NA's
@@ -242,8 +254,7 @@ missing_values <- sapply(gw2022, function(x) sum(is.na(x)))
 missing_values
 ```
 
-Only the variable "csp" contains missing values. I decide to impute the missing values with the mean of 'csp'.
-I verify again if the imputation removed all missing values below.
+Only the variable "csp" contains missing values. I decide to impute the missing values with the mean of 'csp'. I verify again if the imputation removed all missing values below.
 
 ```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
 # Calculate the mean of 'csp', excluding NA values
@@ -310,8 +321,7 @@ corrplot(
 )
 ```
 
-The variables "dp", "dy", "E12", "D12", "csp" and "b.m" are highly correlated with the SP500 stock market price index.
-MULTICOLLINEARITY
+The variables "dp", "dy", "E12", "D12", "csp" and "b.m" are highly correlated with the SP500 stock market price index. MULTICOLLINEARITY
 
 ## Feature Selection I
 
@@ -731,8 +741,7 @@ importances[order(-importances$meanImp), ]
 
 #### Final Feature Selection for Lagged Features
 
-I decide to only keep these following 2 features : "SP500_lag2", "IndexDiv_lag1". I remove all the other variables from the final dataframe. 
-EXPLAIN WHY
+I decide to only keep these following 2 features : "SP500_lag2", "IndexDiv_lag1". I remove all the other variables from the final dataframe. EXPLAIN WHY
 
 ```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
 
@@ -766,7 +775,7 @@ summary(final_df)
 
 ## Neural Network Model
 
-TRY A SUMMARY OF THE 3 MODELS BELOW 
+TRY A SUMMARY OF THE 3 MODELS BELOW
 
 #### Standardizing Data for Neural Network
 
@@ -999,7 +1008,6 @@ cat("Simple Neural Network RMSE:",final_rmse1,"\n")
 
 In this section, I aim to visualize the loss function through which the gradient descent algorithm optimizes the neural network. By considering only two features in my model (SP500_lag2 and IndexDiv_lag1), I can effectively represent the loss function in a 3D plot, providing an intuitive view of how it behaves. This visualization offers valuable insights into the optimization process and allows me better understand how gradient descent navigates towards minimizing the loss, by adjusting the weights accordingly. Such visualization helps me demystify the "black-box" nature of the training process by showing the relationship between the features and how the model finds the optimal solution.
 
-
 ```{r, warning=FALSE, message=FALSE, results='hide', echo=TRUE}
 # Standardize function for input features (replicate neural network input format)
 standardize <- function(x, mean, std) {
@@ -1074,7 +1082,7 @@ loss_matrix <- acast(loss_data, SP500_lag2 ~ IndexDiv_lag1, value.var = "Loss")
 
 A neural network trains through a process known as gradient descent, an optimization algorithm designed to minimize the loss function. Initially, the neural network starts with random weights. During each iteration, or epoch, the input data is passed through the network to make predictions. The loss function then calculates the difference between these predictions and the actual target values, quantifying how well the model is performing.
 
-![Gradient Descent Optimization Algorithm](/Users/mathieu26/Desktop/Github Pages/testwebsite5.github.io/data_science/example1/Gradient_Descent_Gif.gif)
+![Gradient Descent Optimization Algorithm](/Users/mathieu26/Desktop/Github%20Pages/testwebsite5.github.io/data_science/example1/Gradient_Descent_Gif.gif)
 
 This process involves a forward pass, where the input data moves through the network layers to generate predictions. The loss is then computed based on these predictions. Next, a backward pass, or backpropagation, occurs. Here, the network calculates the gradients of the loss function with respect to each weight. These gradients indicate the direction and magnitude of the weight adjustments needed to reduce the loss. The weights are then updated in the opposite direction of the gradient. This cycle repeats over many epochs, iteratively refining the weights to reduce the loss function to its minimum value, indicating an effectively trained model.
 
@@ -1131,7 +1139,7 @@ Y_test <- Y[test_index]
 
 A multi-start in a neural network model refers to the practice of training the model multiple times, each time with different randomly initialized weights. This approach is used to address the issue of local minima in the optimization of neural networks. Because the loss function of a neural network can have many local minima (see picture of a loss function with multiple local minima), starting the training process from different points can help find a better (often lower) minimum of the loss function.
 
-![Loss function with multiple local minima](/Users/mathieu26/Desktop/Github Pages/testwebsite5.github.io/data_science/example1/Gradient_Descent3.png)
+![Loss function with multiple local minima](/Users/mathieu26/Desktop/Github%20Pages/testwebsite5.github.io/data_science/example1/Gradient_Descent3.png)
 
 When using multi-start, the model is trained several times, each time beginning with a different set of initial weights. The result is multiple trained models, each potentially having converged to a different local minimum. The final model is selected based on the one that achieves the best performance on a validation set.
 
@@ -1304,9 +1312,10 @@ cat("Neural Network 2 RMSE:",final_rmse2 ,"\n")
 ```
 
 ### Neural Network Architecture III
+
 #### Adding Hyperparameter Tuning
 
-In this section, I use the same neural network architecture as ... but adds an hyperparameter tuning. 
+In this section, I use the same neural network architecture as ... but adds an hyperparameter tuning.
 
 Again, I re-define the training and testing set using the same methodology as before.
 
@@ -1549,8 +1558,7 @@ This score suggest that ...
 
 ## Gaussian Process Model
 
-In this section, I apply a Gaussian Process Regression model to predict the S&P 500 index.
-Similar to before, I re-define the training and testing set using the same methodology.
+In this section, I apply a Gaussian Process Regression model to predict the S&P 500 index. Similar to before, I re-define the training and testing set using the same methodology.
 
 ```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
 
@@ -1584,7 +1592,7 @@ For this model, I combine the X_train and Y_train into a single data frame as th
 train_data <- data.frame(X_train, TARGET = Y_train)
 ```
 
-Given that the SP500 stock market index is non-stationary, i.e its values fluctuate in ways that don't remain consistent over time, I define a non stationary kernel function that is later included in the 'gausspr' function. 
+Given that the SP500 stock market index is non-stationary, i.e its values fluctuate in ways that don't remain consistent over time, I define a non stationary kernel function that is later included in the 'gausspr' function.
 
 ```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
 # Non-stationary 
@@ -1636,11 +1644,13 @@ cat("Gaussian Process RMSE:",final_rmse4)
 ## Results Summary
 
 #### Models Performances Summary
+
 ```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
 kable(results_df, col.names = c("Model Name", "RMSE"), caption = "Model Performance Summary")
 ```
 
 ### Models Performances Vizualization
+
 ```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
 # Convert SP500 xts to a data frame
 sp500_df <- data.frame(Date = index(SP500), SP500 = as.numeric(coredata(SP500)))
@@ -1703,7 +1713,6 @@ filtered_data <- all_data %>%
   filter(Date >= as.Date("2000-01-01") & Date <= as.Date("2021-12-31"))
 ```
 
-
 ```{r, warning=FALSE, message=FALSE, results='show', echo=TRUE}
 # 2. Updated plotting with filtered data
 ggplot(data = filtered_data, aes(x = Date)) +
@@ -1737,7 +1746,6 @@ filtered_data <- filtered_data %>%
     predictions2 = first(predictions2)
   )
 ```
-
 
 ```{r, warning=FALSE, message=FALSE, results='hide', echo=TRUE}
 # Create the ggplot object
@@ -1781,11 +1789,12 @@ p_plotly
 ```
 
 ## Summary
+
 ### Predicting the S&P 500 Stock Market Index
 
 This project set out to predict the S&P 500 index using various machine learning models. I explored multiple approaches, including neural networks with different architectures and optimization techniques, as well as Gaussian Process Regression. The results provide valuable insights into the strengths and weaknesses of each method and highlight the importance of model complexity, parameter optimization, and feature engineering in time series forecasting.
 
-### Models Performance Overview 
+### Models Performance Overview
 
 The four models evaluated were:
 
@@ -1810,5 +1819,3 @@ Importance of Regularization - Adding dropout and kernel regularization helped m
 The financial market is inherently volatile and influenced by a myriad of factors, making stock market prediction a challenging task. The results of this study underline that while more complex models (like deep neural networks) can indeed capture intricate patterns in the data, simpler models (like Gaussian Processes) offer valuable interpretability that can be crucial for understanding the risks involved in stock market investments.
 
 For future work, incorporating more macroeconomic indicators and using advanced techniques such as Long Short-Term Memory (LSTM) networks could further improve prediction accuracy. Additionally, the combination of model predictions, such as using an ensemble approach, may enhance the robustness of the forecasts.
-
-
